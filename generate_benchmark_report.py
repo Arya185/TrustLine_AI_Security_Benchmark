@@ -82,6 +82,15 @@ def report_agentdojo_results() -> None:
     print("own utility baseline, NOT a security result, and is excluded below.")
     print("=" * 78)
 
+    if not RESULTS_DIR.exists():
+        # RESULTS_DIR.glob(...) above tolerates a missing directory (returns
+        # empty); Path.iterdir() does not -- it raises FileNotFoundError.
+        # Checked explicitly here rather than relying on glob's leniency,
+        # since a fresh checkout or a from-scratch environment has no
+        # results/ directory until something creates it.
+        print("(no results/ directory yet -- nothing has been run)")
+        return
+
     group_dirs = sorted(
         d for d in RESULTS_DIR.iterdir() if d.is_dir() and not d.name.startswith("run_")
     )

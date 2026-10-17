@@ -90,6 +90,19 @@ AgentDojo path to compare.** This needs an explicit decision (see
 "Unresolved issues" below) before a pilot can be described as testing
 TrustLine in any sense.
 
+**Addendum (later session): this finding is preserved unmodified above
+as the historical record it was written as.** A minimal adapter closing
+*part* of this gap was built afterward —
+`src/trustline_bench/agentdojo_adapter.py`, tested with real AgentDojo
+types and no model in `tests/test_agentdojo_adapter.py`. It does now
+call `gateway.evaluate()` from inside an AgentDojo pipeline element, for
+one mapped tool. It is still never run against a real model, still not
+wired into `--defense`, and still cannot exercise TrustLine's
+taint/origin check, for reasons specific to AgentDojo's message format
+— so the core conclusion above (no real-model AgentDojo result has ever
+tested a TrustLine intervention) remains true. Full detail:
+`docs/agentdojo_trustline_integration.md`.
+
 ### Finding 2: the planned "10 pairs" cannot be run as a single CLI invocation
 
 `benchmark.py`'s `--user-task`/`--injection-task` CLI flags are both

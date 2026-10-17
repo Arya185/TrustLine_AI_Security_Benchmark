@@ -30,6 +30,7 @@ side effects can never leak into another case's observed ground truth.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import sys
@@ -335,40 +336,145 @@ def run_case(case: dict[str, Any], env: MockToolEnvironment) -> dict[str, Any]:
     raise ValueError(f"Unknown case type: {case_type!r}")
 
 
+def _config_fingerprint(suite_version: str, python_version: str, platform_str: str) -> str:
+    """A short, deterministic fingerprint of the non-secret configuration
+    that produced a run -- suite/policy version, interpreter, platform.
+    None of these inputs are secret, so this is safe to write into a
+    tracked or shared report; it exists so two runs can be compared for
+    "were these produced under the same configuration" at a glance,
+    without diffing full header objects by hand."""
+    payload = json.dumps(
+        {
+            "suite_version": suite_version,
+            "gateway_policy_version": gateway.POLICY_VERSION,
+            "python_version": python_version,
+            "platform": platform_str,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def run_all(cases_path: Path, results_dir: Path) -> list[dict[str, Any]]:
+    """Runs every case and writes results/run_<timestamp>_<run_id>.jsonl.
+
+    Collision and interruption safety:
+      - The filename includes an 8-hex-char slice of the run's UUID4
+        run_id, not just a second-resolution timestamp. Two runs
+        started within the same wall-clock second (a real,
+        demonstrated risk with the old timestamp-only filename) no
+        longer produce the same path. A pre-write existence check still
+        raises a clear error in the astronomically unlikely event of an
+        actual collision, rather than silently overwriting.
+      - A `.inprogress` marker file is written, containing just
+        run_id/suite_version/case_count/status="started", BEFORE any
+        case executes. It is deleted only after the final results file
+        has been fully written. If the process is interrupted (crash,
+        kill, power loss) between those two points, the marker is left
+        orphaned on disk -- a reliable, inspectable signal that a run
+        started but never completed, which the all-in-memory-then-
+        write-once design otherwise gives no evidence of at all.
+    """
     cases = load_cases(cases_path)
     suite_versions = {c.get("suite_version") for c in cases}
     if len(suite_versions) != 1:
         raise ValueError(f"cases file has inconsistent suite_version values: {suite_versions}")
     suite_version = next(iter(suite_versions))
 
-    # Fresh environment per case: one case's side effects must never leak
-    # into another case's observed ground truth.
-    results = [run_case(case, MockToolEnvironment()) for case in cases]
-
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = uuid.uuid4().hex
+    # UTC throughout this module: run_timestamp_utc below, and every
+    # per-case timestamp_utc field, are datetime.now(timezone.utc)
+    # renderings -- never local time.
     run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out_path = results_dir / f"run_{run_timestamp}.jsonl"
-    suite_metrics = metrics.summarize(results)
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(
+    run_id_short = run_id[:8]
+    out_path = results_dir / f"run_{run_timestamp}_{run_id_short}.jsonl"
+    marker_path = results_dir / f".run_{run_timestamp}_{run_id_short}.inprogress"
+
+    if out_path.exists():
+        # Not expected to ever trigger given the run_id suffix above --
+        # kept as a fail-safe rather than a silent overwrite, per the
+        # explicit requirement not to clobber an existing result file.
+        raise FileExistsError(f"refusing to overwrite existing result file: {out_path}")
+
+    marker_path.write_text(
+        json.dumps(
+            {
+                "status": "started",
+                "run_id": run_id,
+                "run_timestamp_utc": run_timestamp,
+                "suite_version": suite_version,
+                "case_count": len(cases),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        # Fresh environment per case: one case's side effects must never
+        # leak into another case's observed ground truth.
+        results = [run_case(case, MockToolEnvironment()) for case in cases]
+
+        suite_metrics = metrics.summarize(results)
+        passed_count = sum(1 for r in results if r["pass"])
+        failed_count = len(results) - passed_count
+        python_version = sys.version
+        platform_str = platform.platform()
+
+        with out_path.open("w", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "status": "completed",
+                        "run_note": RUN_NOTE,
+                        "run_id": run_id,
+                        "run_timestamp_utc": run_timestamp,
+                        "suite_version": suite_version,
+                        "gateway_policy_version": gateway.POLICY_VERSION,
+                        "case_count": len(cases),
+                        "passed_count": passed_count,
+                        "failed_count": failed_count,
+                        "python_version": python_version,
+                        "platform": platform_str,
+                        "config_fingerprint": _config_fingerprint(suite_version, python_version, platform_str),
+                        "suite_metrics": suite_metrics,
+                    }
+                )
+                + "\n"
+            )
+            for result in results:
+                f.write(json.dumps(result) + "\n")
+    except Exception as exc:
+        # A caught exception (a real bug) is a DIFFERENT, more
+        # informative state than a hard process kill: update the
+        # marker to say so explicitly, rather than either deleting it
+        # (which would erase the only evidence this run was attempted)
+        # or leaving it saying "started" (which would misrepresent a
+        # clean failure as a mysterious interruption). The exception is
+        # re-raised, not swallowed -- the caller must still see it.
+        marker_path.write_text(
             json.dumps(
                 {
-                    "run_note": RUN_NOTE,
-                    "run_id": uuid.uuid4().hex,
+                    "status": "failed",
+                    "run_id": run_id,
                     "run_timestamp_utc": run_timestamp,
                     "suite_version": suite_version,
-                    "gateway_policy_version": gateway.POLICY_VERSION,
                     "case_count": len(cases),
-                    "python_version": sys.version,
-                    "platform": platform.platform(),
-                    "suite_metrics": suite_metrics,
+                    "error": f"{type(exc).__name__}: {exc}",
                 }
-            )
-            + "\n"
+            ),
+            encoding="utf-8",
         )
-        for result in results:
-            f.write(json.dumps(result) + "\n")
+        raise
+    else:
+        # Success: the completed file at out_path is now the record of
+        # this run; the "started" marker has served its purpose and is
+        # removed. A marker left on disk after this point in time can
+        # only mean the process never reached here -- an interruption,
+        # not a clean failure (that case is handled above) and not a
+        # success (that case is handled here).
+        marker_path.unlink(missing_ok=True)
 
     return results
 

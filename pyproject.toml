@@ -6,11 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "trustline-bench"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = [
+# Core dependencies for src/trustline_bench/ and the custom-suite runner
+# (python -m trustline_bench.runner), verified by tracing actual imports:
+# zero third-party packages. The gateway, mock tools, audit log, metrics,
+# and runner use only the Python standard library.
+dependencies = []
+
+[project.optional-dependencies]
+# pytest itself -- needed only to run tests/, not to run the custom
+# benchmark (verified: tests/*.py's only third-party import is pytest).
+test = [
+    "pytest",
+]
+# Needed only for the real-model AgentDojo evaluation track and its two
+# connectivity-check scripts (check_agentdojo_model.py, smoke_test.py) --
+# never imported anywhere under src/trustline_bench/ or tests/, traced
+# directly from each script's actual import statements, not assumed.
+agentdojo = [
     "agentdojo",
+    "openai",
     "python-dotenv",
     "requests",
-    "pytest",
 ]
 
 [tool.setuptools.packages.find]

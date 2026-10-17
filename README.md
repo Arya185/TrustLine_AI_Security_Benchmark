@@ -97,7 +97,7 @@ small, non-statistically-significant real-model sample (see
 ## B. Project status
 
 **Last verified locally, this session:** `python -m pytest tests/ -v` →
-**191/191 passed**. `python -m trustline_bench.runner` → **27/27**
+**214/214 passed**. `python -m trustline_bench.runner` → **27/27**
 custom-suite cases passed, `suite_version` `2.1.0`, gateway
 `POLICY_VERSION` `1.1.1`.
 
@@ -109,9 +109,11 @@ custom-suite cases passed, `suite_version` `2.1.0`, gateway
 | Independent reference-oracle cross-check | **Implemented, tested** — `tests/test_independent_oracle.py` (49 collected cases, parametrized over all 24 gateway-type custom cases) |
 | Suite-level metrics | **Implemented, tested** — `tests/test_metrics.py` (14), see [J](#j-metrics-and-their-interpretation) |
 | Custom benchmark suite | **Implemented** — 27 cases, `suite_version` `2.1.0`, `tests/test_custom_suite.py` (7) |
+| Reproducible run artifacts (unique run IDs, started/completed/failed status, config fingerprint) | **Implemented, tested** — `tests/test_runner_artifacts.py` (9), see [N](#n-running-the-custom-benchmark) |
 | AgentDojo historical pilot | **Observed** — real result files exist under `results/`, 18 real attack trials total, all `security=False` (see [R](#r-results-and-research-status)) |
 | AgentDojo expanded pilot (10 pairs × 2 conditions = 20 trials) | **Planned, not executed.** `docs/agentdojo_experiment_plan.md` proposes it; `docs/readiness_review.md` completed a no-external-call readiness audit and is **awaiting an explicit decision from the project owner** before any call is made. No new AgentDojo results exist beyond the historical ones already on disk. |
-| Real integration between AgentDojo and TrustLine's own gateway code | **Not implemented.** See [Q](#q-agentdojo-evaluation) — this is the single most important status fact in this document. |
+| Deterministic AgentDojo↔TrustLine adapter (one tool, no real model) | **Implemented, tested** — `src/trustline_bench/agentdojo_adapter.py`, `tests/test_agentdojo_adapter.py` (11); cannot exercise TrustLine's taint/origin check — see [Q](#q-agentdojo-evaluation) and `docs/agentdojo_trustline_integration.md` |
+| Real-model integration between AgentDojo and TrustLine's own gateway code | **Not implemented, not run.** See [Q](#q-agentdojo-evaluation) — this is the single most important status fact in this document. |
 
 **Major known limitations** (full detail in [S](#s-limitations-and-known-gaps)
 and `docs/independent_audit.md`): an attacker who can run
@@ -128,7 +130,7 @@ outcomes — has only a 3-scenario-per-condition historical pilot (not
 statistically meaningful) and a reviewed-but-not-executed plan for more
 data. **Code/test state (verified live today) and research-experiment
 state (last real AgentDojo data from an earlier session, nothing new
-since) are different clocks — do not read "191 tests pass" as "the
+since) are different clocks — do not read "214 tests pass" as "the
 AgentDojo research question is answered."**
 
 ## C. Problem statement and motivation
@@ -567,6 +569,24 @@ Benchmark/
     └── readiness_review.md             # AgentDojo pilot readiness audit — no external calls made
 ```
 
+**Present in this session's working tree but not yet committed**
+(verified against `git status --short`; listed here, not in the tree
+above, so this section never claims committed state that isn't real):
+
+```
+src/trustline_bench/agentdojo_adapter.py   # TrustLineEnforcementElement, translate_agentdojo_call()
+tests/test_agentdojo_adapter.py            # adapter tests against real AgentDojo types (11)
+tests/test_runner_artifacts.py             # run-ID/status/fingerprint artifact tests (9)
+tests/test_generate_benchmark_report.py    # report-generator missing-directory tests (3)
+docs/agentdojo_trustline_integration.md    # AgentDojo↔TrustLine integration design + limitations
+```
+
+`pyproject.toml`, `generate_benchmark_report.py`, and
+`src/trustline_bench/runner.py` are already tracked and shown in the
+tree above; their *contents* were modified this session (dependency
+groups, missing-directory handling, and run-artifact fields,
+respectively) but their paths didn't change.
+
 **Not tracked — local-only or generated, will not exist in a fresh
 clone unless created/configured:**
 
@@ -587,15 +607,36 @@ The installed interpreter in this project's own `.venv` is **Python
 3.14.2** (verified via `python --version` this session) — exceeds the
 minimum, not a claim about every version in between being tested.
 
-**Dependencies** (from `pyproject.toml`, verified, not assumed):
-`agentdojo`, `python-dotenv`, `requests`, `pytest`.
+**Dependencies** (from `pyproject.toml`, verified, not assumed): the core
+package itself has **zero** third-party dependencies — the custom suite
+(`trustline_bench.gateway`, `.runner`, `.models`, `.audit_log`, etc.) is
+pure-stdlib Python, confirmed by installing it alone in an isolated venv
+and checking nothing else landed. Everything else is an **optional
+dependency group**, installed only if you need it:
+
+| Group | Packages | Needed for |
+|---|---|---|
+| (core, always installed) | none | the gateway, mock tools, audit log, runner, `generate_benchmark_report.py` |
+| `test` | `pytest` | running the test suite |
+| `agentdojo` | `agentdojo`, `openai`, `python-dotenv`, `requests` | the AgentDojo pilot path and `agentdojo_adapter.py` |
 
 ```zsh
 cd /Users/aryapatel/arya/Programming/code/Benchmark
 # .venv already exists in this project; verify before assuming:
 ls .venv/bin/activate   # if missing, create it: python3 -m venv .venv
 source .venv/bin/activate
+
+# Minimal install -- just the custom suite, no third-party packages at all:
 pip install -e .
+
+# To also run the test suite:
+pip install -e ".[test]"
+
+# To also run (or test against) the AgentDojo pilot path:
+pip install -e ".[agentdojo]"
+
+# Everything:
+pip install -e ".[test,agentdojo]"
 ```
 
 Do not copy a real API key into any tracked file. `.env` (see next
@@ -646,26 +687,48 @@ python -m trustline_bench.runner
 case against a **fresh** `MockToolEnvironment` (one case's side effects
 never leak into another's observed result), prints a per-case
 pass/fail + `enforcement_success` table and all 8 suite metrics, and
-writes a new file `results/run_<UTC timestamp>.jsonl`.
+writes a new file `results/run_<UTC timestamp>_<run_id prefix>.jsonl`.
 
 **Where results go, and how versioning works:** `run_all()` reads every
 loaded case's `suite_version` and **raises if they don't all agree** — a
 stable version is a precondition for comparing runs, not an
-afterthought. Each run's header line records `run_id` (a fresh UUID4),
+afterthought. Each run's header line records `status` (`"completed"`;
+see below for the other two values), `run_id` (a fresh UUID4, in full),
 `run_timestamp_utc`, `suite_version`, `gateway_policy_version`,
-`case_count`, Python version, platform, and the computed
-`suite_metrics`. **A run never overwrites a previous one** — the
-timestamped filename is unique per invocation (verified: 20 distinct
-`results/run_*.jsonl` files exist on disk from this project's history,
-none overwritten).
+`case_count`, `passed_count`, `failed_count`, `python_version`,
+`platform`, a `config_fingerprint` (a sha256 of `suite_version` +
+`gateway_policy_version` + `python_version` + `platform` — a quick way
+to tell at a glance whether two runs are comparable, computed from
+non-secret fields only), and the computed `suite_metrics`.
 
-**Identifying an incomplete or failed run:** every case's own result
-object has a `pass: bool` and an `errors: []` list — a non-empty
-`errors` list or `pass: false` on any case means that case failed; the
-file itself is only ever written in full (the runner builds the whole
-results list in memory, then writes the file once), so a crash mid-run
-produces no `results/run_*.jsonl` file at all rather than a truncated
-one.
+**A run never overwrites a previous one, even within the same wall-clock
+second:** the filename includes both the UTC timestamp *and* an 8-hex-
+character run-ID prefix, because the timestamp alone has only one-second
+resolution — two runs started in the same second used to collide and
+silently overwrite each other (reproduced and fixed; regression test:
+`tests/test_runner_artifacts.py::test_two_runs_in_the_same_wall_clock_second_do_not_collide`).
+If the exact target path somehow already exists anyway, `run_all()`
+raises `FileExistsError` rather than overwriting it.
+
+**Identifying an incomplete or failed run:** while a run is in progress,
+`run_all()` writes a marker file,
+`results/.run_<timestamp>_<run_id prefix>.inprogress`, containing
+`{"status": "started", ...}`. Three outcomes are distinguishable on
+disk afterward:
+- **Completed:** the marker is gone, and a matching `run_*.jsonl` exists
+  with `status: "completed"` in its header.
+- **Failed (a caught exception):** the marker still exists, its
+  `status` is `"failed"`, and it records the exception type and
+  message — no `.jsonl` file is written for a failed run.
+- **Interrupted (e.g. killed, not a caught exception):** the marker
+  still exists with `status: "started"` and no matching `.jsonl` exists
+  — Python's own exception handling never runs on a hard kill, so this
+  is the only state a true interruption can leave behind, and no code
+  path pretends otherwise.
+
+Every case's own result object additionally has a `pass: bool` and an
+`errors: []` list for per-case pass/fail, independent of the run-level
+`status` above.
 
 **Interpreting output:** the printed table's `enforcement_success`
 column is `None` for ALLOW-expected and audit-type cases (the concept
@@ -679,7 +742,7 @@ source .venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-**Last verified, live, this session: 191/191 passed.**
+**Last verified, live, this session: 214/214 passed.**
 
 **Focused test groups**, using the actual filenames in this repository:
 
@@ -691,10 +754,15 @@ python -m pytest tests/test_audit_limitations.py -v              # Phase 3 weakn
 python -m pytest tests/test_audit_checkpoint_integrity.py -v     # checkpoint-backed verifier tests (20)
 python -m pytest tests/test_independent_oracle.py -v             # second-implementation cross-check (49)
 python -m pytest tests/test_custom_suite.py -v                   # end-to-end structural checks (7)
+python -m pytest tests/test_runner_artifacts.py -v               # run-ID/status/fingerprint artifact tests (9)
+python -m pytest tests/test_generate_benchmark_report.py -v      # report-generator missing-directory tests (3)
+python -m pytest tests/test_agentdojo_adapter.py -v              # AgentDojo-adapter tests (11, skipped if the `agentdojo` extra isn't installed)
 ```
 
 This runs entirely offline — no network call, no real LLM, no real
-external tool call, in any file above.
+external tool call, in any file above, including
+`test_agentdojo_adapter.py`, which uses only real AgentDojo *types* and
+a real local workspace environment, never a model or the network.
 
 ## P. Custom benchmark suite
 
@@ -784,18 +852,32 @@ historical data already on disk — see** [R](#r-results-and-research-status)
 **The single most important fact in this section:** tracing the actual
 AgentDojo pipeline source (`agentdojo/agent_pipeline/agent_pipeline.py`)
 shows `--defense tool_filter` constructs `OpenAILLMToolFilter`, an
-LLM-prompted tool-selection stage that **ships with AgentDojo itself.**
-A full search of the installed `agentdojo` package and this repository
-for any call into `trustline_bench.gateway`, `MockToolEnvironment`, or
-`Authorization` found **zero matches**, and no `--module-to-load`
-registration exists anywhere in this repo. **There is currently no code
-path by which AgentDojo's pipeline calls TrustLine's own gateway code.**
-Every historical "baseline vs tool_filter" result compares two
-AgentDojo-native configurations; neither is TrustLine. This is
-documented in full in `docs/readiness_review.md`'s Finding 1 and
-is an open, unresolved decision (build a real integration, or
-explicitly relabel any future pilot as evaluating AgentDojo's own
-defense rather than TrustLine's).
+LLM-prompted tool-selection stage that **ships with AgentDojo itself,
+and shares no code with TrustLine.** Every historical "baseline vs
+tool_filter" result compares two AgentDojo-native configurations;
+neither is TrustLine. This is documented in full in
+`docs/readiness_review.md`'s Finding 1.
+
+**What has changed since that finding:** a minimal adapter now exists —
+`src/trustline_bench/agentdojo_adapter.py` — that does call
+`trustline_bench.gateway.evaluate()` from inside an AgentDojo pipeline
+element (`TrustLineEnforcementElement`), for one mapped tool
+(`send_email`). It is tested in `tests/test_agentdojo_adapter.py` with
+real AgentDojo types (`FunctionCall`, a real workspace environment, a
+real `FunctionsRuntime`) and proves, deterministically, that a denied
+call never reaches AgentDojo's own tool and an allowed one executes
+normally. **It has never been run against a real model, is not wired
+into AgentDojo's `--defense` CLI enum, and cannot exercise TrustLine's
+taint/origin-based prompt-injection check** — AgentDojo's message
+history carries no provenance signal, so every call this adapter
+translates is assigned `origin=USER_INSTRUCTION` regardless of its real
+history. Full detail, including this exact limitation stated multiple
+times on purpose, is in `docs/agentdojo_trustline_integration.md`. This
+closes part of Finding 1 (a policy check can now run before execution,
+for one tool) and leaves the rest open — building a real integration
+usable in a real pilot, or explicitly relabeling any future pilot as
+evaluating AgentDojo's own defense rather than TrustLine's, is still an
+unresolved decision for whoever runs the next pilot.
 
 **Research question (as proposed, `docs/agentdojo_experiment_plan.md`):**
 does AgentDojo's `tool_filter` defense reduce real-model attack success
@@ -864,7 +946,7 @@ decisions awaiting approval:** `docs/readiness_review.md`.
 
 ### Custom-suite test and benchmark observations (Observed, this session)
 
-`pytest`: 191/191. `python -m trustline_bench.runner`: 27/27, all 8
+`pytest`: 214/214. `python -m trustline_bench.runner`: 27/27, all 8
 metrics computed, 7 at `1.0`/`0.0` (perfect on this suite's current
 scope) and `checkpoint_backed_tamper_detection_rate: 1.0`. These are
 observations about this deterministic, mocked suite — **not** a
@@ -935,7 +1017,7 @@ historical claims) — full detail in `docs/independent_audit.md`,
 | 5 | No independently-controlled *external* checkpoint anchor exists | **Not implemented** — documented as future work, not attempted |
 | 6 | 24 of 27 custom cases' ground truth was originally generated by running the code under test | **Partially mitigated** — independent reference-oracle cross-check added, 49/49 agree, but it is the same project/author, not a blind second reviewer |
 | 7 | The direct-handler authorization bypass found in Phase 3 (5 of 7 handlers unprotected) | **Fixed** (Phase 4) — tested with adversarial cases proving both the no-authorization and fabricated-authorization paths fail safely |
-| 8 | No real integration between TrustLine's gateway and AgentDojo's pipeline | **Not implemented** — see [Q](#q-agentdojo-evaluation), the most consequential open item for interpreting any AgentDojo result as being about TrustLine |
+| 8 | No integration between TrustLine's gateway and AgentDojo's pipeline that has been run against a real model, and no integration path that can honestly exercise TrustLine's taint/origin check | **Partially implemented** — a deterministic adapter (`agentdojo_adapter.py`) now calls `gateway.evaluate()` from inside an AgentDojo pipeline element for one mapped tool, tested with real AgentDojo types and no model; see [Q](#q-agentdojo-evaluation) and `docs/agentdojo_trustline_integration.md` for exactly what is and isn't covered — still the most consequential open item for interpreting any *real-model* AgentDojo result as being about TrustLine |
 | 9 | AgentDojo sample size (3 historical scenarios per condition; 20 proposed, not yet run) | **Open** — too small for a general or statistically significant claim either way |
 | 10 | All mocked tool side effects are in-memory Python objects, not real integrations | **By design** — explicitly a mock environment; no claim is made about real email, filesystem, or banking APIs behaving the same way |
 | 11 | Exact-match-only destination allowlists (no case/whitespace normalization) | **Deliberate design choice**, not a bug — normalizing before matching is itself a place a bypass could be introduced |
@@ -952,7 +1034,7 @@ rather than implied away.
 **What a fresh clone *can* fully regenerate, deterministically, with no
 history and no credentials:**
 - The entire custom suite (`python -m trustline_bench.runner`) and all
-  191 tests (`python -m pytest tests/ -v`) — both are pure code +
+  214 tests (`python -m pytest tests/ -v`) — both are pure code +
   `cases/custom_cases.jsonl`, no prior `results/` content needed.
   `trustline_bench.runner.run_all()` creates `results/` itself via
   `results_dir.mkdir(parents=True, exist_ok=True)` if it doesn't
@@ -976,19 +1058,18 @@ provider call is not bit-reproducible the way the mocked custom suite
 is). **Do not treat the historical AgentDojo table in this README as
 something `git clone` alone hands you.**
 
-**`generate_benchmark_report.py` requires a `results/` directory to
-already exist** — verified this session: its custom-suite section
-handles a missing directory gracefully (`Path.glob()` on a nonexistent
-path returns empty, no crash), but its AgentDojo section calls
-`RESULTS_DIR.iterdir()`, which **raises `FileNotFoundError` if
-`results/` does not exist at all**. On a truly fresh clone, running
-`python generate_benchmark_report.py` *before* ever running
-`python -m trustline_bench.runner` (which creates `results/` as a side
-effect) will crash rather than print "no results found." This is a real
-inconsistency in the script's error handling, discovered during this
-documentation review; per this task's scope restriction, the script
-itself was left unchanged — run the custom benchmark at least once
-before running the report generator to avoid it.
+**`generate_benchmark_report.py` no longer requires a `results/`
+directory to exist first.** It previously crashed with
+`FileNotFoundError` on a truly fresh clone — its custom-suite section
+tolerated a missing directory (`Path.glob()` on a nonexistent path
+returns empty), but its AgentDojo section called
+`RESULTS_DIR.iterdir()`, which does not. Fixed this session with an
+explicit existence check; regression test:
+`tests/test_generate_benchmark_report.py::test_missing_results_directory_does_not_crash`.
+Running `python generate_benchmark_report.py` on a fresh clone, before
+ever running the custom benchmark, now prints
+"(no results/ directory yet — nothing has been run)" instead of
+crashing.
 
 **Where AgentDojo output goes when a `--logdir` is supplied:** confirmed
 from the installed `agentdojo` package's own `logging.py`
@@ -1004,15 +1085,21 @@ every case by `run_all()`) and `gateway.POLICY_VERSION` (currently
 every per-case `config`.
 
 **Distinguishing historical from newly created custom-suite results:**
-every run's header carries `run_id`/`suite_version`/
-`gateway_policy_version`/`case_count` — **but 8 of the 20
-`results/run_*.jsonl` files that exist in this local development
-environment predate these header fields being added** and simply lack
-them (verified by checking each file's header this session;
-`generate_benchmark_report.py` flags this per file too). None of these
-local files are tracked by Git either way — this distinction matters
-only within one local checkout's own `results/` history, not between
-clones.
+every run's header now carries `status`/`run_id`/`run_timestamp_utc`/
+`suite_version`/`gateway_policy_version`/`case_count`/`passed_count`/
+`failed_count`/`python_version`/`platform`/`config_fingerprint` — **but
+historical `results/run_*.jsonl` files predate one or both rounds of
+header fields being added** (the original `run_id`/`suite_version`/
+`gateway_policy_version`/`case_count` fields, and this session's
+`status`/`passed_count`/`failed_count`/`config_fingerprint` fields) and
+simply lack whichever fields postdate them (verified by checking each
+file's header this session; `generate_benchmark_report.py` flags this
+per file too). The filename format also changed this session — new
+runs are `run_<timestamp>_<run_id prefix>.jsonl`, not
+`run_<timestamp>.jsonl` (see [N](#n-running-the-custom-benchmark) for
+why). None of these local files are tracked by Git either way — this
+distinction matters only within one local checkout's own `results/`
+history, not between clones.
 
 **Reproducing an external model run** (once one has actually happened)
 would require the exact pair list, model enum value, benchmark version,
