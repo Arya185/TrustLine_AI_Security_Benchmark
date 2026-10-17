@@ -52,8 +52,10 @@ different things and are never averaged together:
    in for model turns. No real LLM, no real network call, anywhere in
    this half.
 2. **An AgentDojo integration** (`results/agentdojo-*`,
-   `results/trustline-matrix-*`, `docs/agentdojo_experiment_plan.md`,
-   `docs/phase6_readiness_review.md`) — real calls to `gpt-4o-mini` via
+   `results/trustline-matrix-*` — generated locally, gitignored, **not**
+   present in a fresh clone, see [K](#k-repository-layout)/[T](#t-reproducibility-and-artifact-provenance);
+   plus the tracked `docs/agentdojo_experiment_plan.md`,
+   `docs/readiness_review.md`) — real calls to `gpt-4o-mini` via
    OpenRouter, through the third-party [AgentDojo](https://agentdojo.spylab.ai)
    framework, to see whether a real model can be steered by injected
    content. **As of this writing, AgentDojo's pipeline does not call
@@ -108,11 +110,11 @@ custom-suite cases passed, `suite_version` `2.1.0`, gateway
 | Suite-level metrics | **Implemented, tested** — `tests/test_metrics.py` (14), see [J](#j-metrics-and-their-interpretation) |
 | Custom benchmark suite | **Implemented** — 27 cases, `suite_version` `2.1.0`, `tests/test_custom_suite.py` (7) |
 | AgentDojo historical pilot | **Observed** — real result files exist under `results/`, 18 real attack trials total, all `security=False` (see [R](#r-results-and-research-status)) |
-| AgentDojo expanded pilot (10 pairs × 2 conditions = 20 trials) | **Planned, not executed.** `docs/agentdojo_experiment_plan.md` proposes it; `docs/phase6_readiness_review.md` completed a no-external-call readiness audit and is **awaiting an explicit decision from the project owner** before any call is made. No new AgentDojo results exist beyond the historical ones already on disk. |
+| AgentDojo expanded pilot (10 pairs × 2 conditions = 20 trials) | **Planned, not executed.** `docs/agentdojo_experiment_plan.md` proposes it; `docs/readiness_review.md` completed a no-external-call readiness audit and is **awaiting an explicit decision from the project owner** before any call is made. No new AgentDojo results exist beyond the historical ones already on disk. |
 | Real integration between AgentDojo and TrustLine's own gateway code | **Not implemented.** See [Q](#q-agentdojo-evaluation) — this is the single most important status fact in this document. |
 
 **Major known limitations** (full detail in [S](#s-limitations-and-known-gaps)
-and `docs/phase3_independent_audit.md`): an attacker who can run
+and `docs/independent_audit.md`): an attacker who can run
 arbitrary Python in this process is outside every mechanism here; the
 audit log's checkpoint defense has a real gap for tampers confined to
 the window after the last checkpoint; AgentDojo's `tool_filter` defense
@@ -162,8 +164,8 @@ a different code path from calling the tool method directly and
 skipping the check. This repository's own Phase 3 audit found exactly
 that gap in an earlier version of this code (5 of 7 tool handlers had no
 protection against direct invocation) — see
-`docs/phase3_independent_audit.md` and
-`docs/phase4_execution_boundary.md` for the full finding and fix.
+`docs/independent_audit.md` and
+`docs/execution_boundary.md` for the full finding and fix.
 
 **Why auditability matters:** even a correctly-enforced decision benefits
 from a tamper-evident record of what was decided and what happened — so
@@ -421,7 +423,7 @@ this process.** Such an attacker could construct a fake `Authorization`
 by hand, add their own token to `_issued_tokens` directly, monkey-patch
 `gateway.evaluate` or `_authorize` itself, or replace the class outright
 — nothing here is a sandbox, and this document does not claim otherwise.
-Full design rationale in `docs/phase4_execution_boundary.md`.
+Full design rationale in `docs/execution_boundary.md`.
 
 ## I. Audit logging and integrity
 
@@ -473,7 +475,7 @@ these failure paths return `valid=True`.
 
 **Five-class threat model, design-option comparison, and the full
 rationale for why this combination (not signed checkpoints, not a
-real external service) was chosen:** `docs/phase5_audit_integrity.md`.
+real external service) was chosen:** `docs/audit_integrity.md`.
 
 ## J. Metrics and their interpretation
 
@@ -526,11 +528,12 @@ claim about any real model or real-world deployment.
 
 ## K. Repository layout
 
+**Tracked in Git** (verified via `git ls-files`, not assumed):
+
 ```
 Benchmark/
 ├── README.md                          # this file
 ├── pyproject.toml                     # project metadata, dependencies
-├── .env                                # API credentials (gitignored, see M)
 ├── .gitignore
 ├── smoke_test.py                       # standalone OpenRouter connectivity probe
 ├── check_agentdojo_model.py            # minimal AgentDojo-style OpenAI-client connectivity check
@@ -554,19 +557,28 @@ Benchmark/
 │   └── test_custom_suite.py            # end-to-end structural checks over cases/custom_cases.jsonl (7)
 ├── cases/
 │   └── custom_cases.jsonl              # versioned custom cases, suite_version 2.1.0, 27 cases
-├── results/                            # gitignored — custom-suite run_*.jsonl + real AgentDojo trace trees
 └── docs/
     ├── benchmark_protocol.md           # custom-suite methodology, per-phase verification log
     ├── agentdojo_experiment_plan.md    # proposed (not executed) expanded AgentDojo pilot
-    ├── phase3_coverage_matrix.md       # case-by-case coverage matrix
-    ├── phase3_independent_audit.md     # skeptical re-audit; ground-truth circularity, found bugs
-    ├── phase4_execution_boundary.md    # authorization-token design and its threat model
-    ├── phase5_audit_integrity.md       # audit checkpoint design, five-class threat model
-    └── phase6_readiness_review.md      # AgentDojo pilot readiness audit — no external calls made
+    ├── coverage_matrix.md              # case-by-case coverage matrix
+    ├── independent_audit.md            # skeptical re-audit; ground-truth circularity, found bugs
+    ├── execution_boundary.md           # authorization-token design and its threat model
+    ├── audit_integrity.md              # audit checkpoint design, five-class threat model
+    └── readiness_review.md             # AgentDojo pilot readiness audit — no external calls made
 ```
 
-`.venv/`, `__pycache__/`, `.pytest_cache/`, `*.egg-info/`, and `.env`
-are gitignored and excluded above.
+**Not tracked — local-only or generated, will not exist in a fresh
+clone unless created/configured:**
+
+| Path | What it is |
+|---|---|
+| `.env` | Your own API credentials. Gitignored. A fresh clone has no `.env` — you create it yourself (see [M](#m-configuration-and-secrets)); nothing in this repository ships a template with real-looking values. |
+| `results/` | Custom-suite `run_*.jsonl` output and real AgentDojo trace trees. Gitignored, entirely generated locally — see [T](#t-reproducibility-and-artifact-provenance) for exactly what that means for reproducing historical numbers. |
+| `.venv/` | Your own virtual environment, created per [L](#l-requirements-and-installation). |
+| `__pycache__/`, `.pytest_cache/`, `*.egg-info/` | Python/pytest-generated caches. |
+
+All four categories above are excluded from the tracked tree shown
+above and are listed in `.gitignore` (verified this session).
 
 ## L. Requirements and installation
 
@@ -734,7 +746,7 @@ the proposed scenario and recording the actual output, which can prove
 determinism but not correctness on its own; this was independently
 re-derived afterward from the documented policy constants (not by
 reading `gateway.py`'s control flow) in `tests/test_independent_oracle.py`,
-with 49/49 checks agreeing — see `docs/phase3_independent_audit.md`'s
+with 49/49 checks agreeing — see `docs/independent_audit.md`'s
 "Ground-truth circularity" section for the full, honest treatment of
 this limitation.
 
@@ -780,7 +792,7 @@ registration exists anywhere in this repo. **There is currently no code
 path by which AgentDojo's pipeline calls TrustLine's own gateway code.**
 Every historical "baseline vs tool_filter" result compares two
 AgentDojo-native configurations; neither is TrustLine. This is
-documented in full in `docs/phase6_readiness_review.md`'s Finding 1 and
+documented in full in `docs/readiness_review.md`'s Finding 1 and
 is an open, unresolved decision (build a real integration, or
 explicitly relabel any future pilot as evaluating AgentDojo's own
 defense rather than TrustLine's).
@@ -797,7 +809,7 @@ AgentDojo-native mechanism, not TrustLine's).
 **Planned tasks and trial count:** 10 (user_task, injection_task) pairs
 × 2 conditions × 1 repetition = 20 trials — the existing 3 historical
 pairs plus 7 new candidates, listed and explicitly caveated as
-unvalidated-by-execution in `docs/phase6_readiness_review.md`. **This
+unvalidated-by-execution in `docs/readiness_review.md`. **This
 list is proposed, not approved or run.**
 
 **Model/provider configuration, verified from source (not assumed):**
@@ -846,7 +858,7 @@ as errors, never silently defaulted to a `security`/`utility` value
 either way.
 
 **Full readiness audit, every finding, and the exact unresolved
-decisions awaiting approval:** `docs/phase6_readiness_review.md`.
+decisions awaiting approval:** `docs/readiness_review.md`.
 
 ## R. Results and research status
 
@@ -895,7 +907,7 @@ code.**
 
 **None exist.** The expanded 20-trial pilot is proposed
 (`docs/agentdojo_experiment_plan.md`) and has completed a readiness
-review with zero external calls (`docs/phase6_readiness_review.md`),
+review with zero external calls (`docs/readiness_review.md`),
 but has not been executed. Do not read anything in this README as a new
 AgentDojo result.
 
@@ -910,9 +922,9 @@ interpretation rules").
 ## S. Limitations and known gaps
 
 Ranked by severity, reconciled against current tests (not just
-historical claims) — full detail in `docs/phase3_independent_audit.md`,
-`docs/phase4_execution_boundary.md`, `docs/phase5_audit_integrity.md`,
-`docs/phase6_readiness_review.md`.
+historical claims) — full detail in `docs/independent_audit.md`,
+`docs/execution_boundary.md`, `docs/audit_integrity.md`,
+`docs/readiness_review.md`.
 
 | # | Issue | Status |
 |---|---|---|
@@ -931,63 +943,116 @@ historical claims) — full detail in `docs/phase3_independent_audit.md`,
 
 ## T. Reproducibility and artifact provenance
 
-**Local tests:** `python -m pytest tests/ -v` (offline, deterministic,
-no credentials needed).
+**`results/` is gitignored and contains zero tracked files** (verified:
+`git ls-files` returns nothing under `results/`). **A fresh clone of
+this repository has no `results/` directory and no historical AgentDojo
+trace files at all.** This has real consequences, stated plainly below
+rather than implied away.
 
-**Custom benchmark:** `python -m trustline_bench.runner` — see
-[N](#n-running-the-custom-benchmark) for exact output/versioning
-behavior.
+**What a fresh clone *can* fully regenerate, deterministically, with no
+history and no credentials:**
+- The entire custom suite (`python -m trustline_bench.runner`) and all
+  191 tests (`python -m pytest tests/ -v`) — both are pure code +
+  `cases/custom_cases.jsonl`, no prior `results/` content needed.
+  `trustline_bench.runner.run_all()` creates `results/` itself via
+  `results_dir.mkdir(parents=True, exist_ok=True)` if it doesn't
+  already exist — you do not need to create it by hand.
+- Every number in [J](#j-metrics-and-their-interpretation) and the
+  custom-suite rows of [R](#r-results-and-research-status) — they come
+  from this deterministic path, not from any historical file.
+
+**What a fresh clone *cannot* reproduce:** the specific historical
+AgentDojo numbers quoted in [R](#r-results-and-research-status) (the
+1/3-vs-3/3 utility, 0/3-vs-0/3 security table, and the 18-trial
+aggregate) come from real trace files that are **not part of this
+repository** and were never committed. Reproducing them exactly would
+require either (a) the original `results/agentdojo-*`/
+`results/trustline-matrix-*` directories, obtained some other way than
+cloning this repo, or (b) re-running the real AgentDojo pilot against
+OpenRouter — which costs real API calls, requires your own credentials,
+and is not guaranteed to reproduce the identical historical trace files
+even if the aggregate utility/security outcome happens to match (a real
+provider call is not bit-reproducible the way the mocked custom suite
+is). **Do not treat the historical AgentDojo table in this README as
+something `git clone` alone hands you.**
+
+**`generate_benchmark_report.py` requires a `results/` directory to
+already exist** — verified this session: its custom-suite section
+handles a missing directory gracefully (`Path.glob()` on a nonexistent
+path returns empty, no crash), but its AgentDojo section calls
+`RESULTS_DIR.iterdir()`, which **raises `FileNotFoundError` if
+`results/` does not exist at all**. On a truly fresh clone, running
+`python generate_benchmark_report.py` *before* ever running
+`python -m trustline_bench.runner` (which creates `results/` as a side
+effect) will crash rather than print "no results found." This is a real
+inconsistency in the script's error handling, discovered during this
+documentation review; per this task's scope restriction, the script
+itself was left unchanged — run the custom benchmark at least once
+before running the report generator to avoid it.
+
+**Where AgentDojo output goes when a `--logdir` is supplied:** confirmed
+from the installed `agentdojo` package's own `logging.py`
+(`os.makedirs(self.dirpath, exist_ok=True)`) — AgentDojo creates the
+given log directory (and its nested `<pipeline>/<suite>/...`
+subdirectories) itself; nothing in this repository needs to pre-create
+it.
 
 **Benchmark and policy versions:** `cases/custom_cases.jsonl`'s
 `suite_version` (currently `2.1.0`, one shared value enforced across
 every case by `run_all()`) and `gateway.POLICY_VERSION` (currently
-`1.1.1`) are both recorded in every run's header line and every
-per-case `config`.
+`1.1.1`) are both recorded in every custom-suite run's header line and
+every per-case `config`.
 
-**Where metadata and outputs live:** `results/run_*.jsonl` for the
-custom suite (gitignored, never committed, never overwritten — unique
-timestamped filenames); `results/agentdojo-*/`, `results/trustline-matrix-*/`
-for real AgentDojo traces, in AgentDojo's own on-disk layout.
+**Distinguishing historical from newly created custom-suite results:**
+every run's header carries `run_id`/`suite_version`/
+`gateway_policy_version`/`case_count` — **but 8 of the 20
+`results/run_*.jsonl` files that exist in this local development
+environment predate these header fields being added** and simply lack
+them (verified by checking each file's header this session;
+`generate_benchmark_report.py` flags this per file too). None of these
+local files are tracked by Git either way — this distinction matters
+only within one local checkout's own `results/` history, not between
+clones.
 
-**Distinguishing historical from newly created results:** every
-custom-suite run's header carries `run_id`/`suite_version`/
-`gateway_policy_version`/`case_count` — **but 8 of the 20 existing
-`results/run_*.jsonl` files predate these header fields being added**
-and simply lack them (verified by checking each file's header this
-session, not assumed; `generate_benchmark_report.py` flags this per file
-too). Do not attribute a specific suite/policy version to one of those
-older files based on anything other than its own header content.
+**Reproducing an external model run** (once one has actually happened)
+would require the exact pair list, model enum value, benchmark version,
+attack type, and defense flag — all specified in
+`docs/agentdojo_experiment_plan.md` and `docs/readiness_review.md` for
+the *proposed* pilot (not yet run); a real historical result's exact
+parameters are recorded per-file in its own JSON
+(`agentdojo_package_version`, `benchmark_version`, `pipeline_name`, task
+IDs, `attack_type`) — provided you have that file, which, per above, a
+fresh clone does not.
 
-**Reproducing an external model run:** would require the exact pair
-list, model enum value, benchmark version, attack type, and defense
-flag — all specified in `docs/agentdojo_experiment_plan.md` and
-`docs/phase6_readiness_review.md` for the *proposed* pilot (not yet
-run); the historical data's exact parameters are recorded per-file in
-each real result JSON (`agentdojo_package_version`, `benchmark_version`,
-`pipeline_name`, task IDs, `attack_type`).
+**Future recommendation, not implemented here:** a small, sanitized,
+*tracked* summary of key research findings (e.g. the aggregate
+utility/security table, with no raw model transcripts) would let a
+fresh clone see what was found without needing the full historical
+trace files. This is a documentation/process idea, not something this
+task added.
 
 **Secrets are excluded from reports** by construction: no script in
 this repository (`generate_benchmark_report.py`, `inspect_trustline_results.py`,
 the runner) reads or writes `.env` contents; `results/` and `.env` are
-both gitignored.
+both gitignored and, per above, `results/` has zero tracked files.
 
 ```zsh
 cd /Users/aryapatel/arya/Programming/code/Benchmark
 source .venv/bin/activate
 python -m pytest tests/ -v
-python -m trustline_bench.runner
-python generate_benchmark_report.py   # offline; custom-suite + AgentDojo sections kept separate
+python -m trustline_bench.runner              # creates results/ if absent, writes a new run file
+python generate_benchmark_report.py           # run AFTER the line above on a fresh clone, see caveat
 ```
 
 ## U. Research roadmap
 
 In evidence-based order, reflecting what has and has not happened:
 
-1. ~~Phase 6 readiness audit~~ — **done.** `docs/phase6_readiness_review.md`
+1. ~~Phase 6 readiness audit~~ — **done.** `docs/readiness_review.md`
    exists, zero external calls were made producing it, and it ends with
    explicit unresolved decisions, not a conclusion.
 2. **Next, blocked on an explicit decision:** resolve
-   `docs/phase6_readiness_review.md`'s Finding 1 — run the pilot as an
+   `docs/readiness_review.md`'s Finding 1 — run the pilot as an
    honestly-labeled "AgentDojo's own `tool_filter`" comparison, or pause
    to build a real TrustLine↔AgentDojo integration first. These lead to
    different next steps and are not both "in progress" simultaneously.
@@ -1013,7 +1078,7 @@ writing it into the JSONL file.
 (`env.sent_emails`, `env.call_ledger`, `log.entries`,
 `VerificationResult`) over only a verdict or error message — several
 real bugs in this project were only caught because a test checked state,
-not just a return value (see `docs/phase3_independent_audit.md`).
+not just a return value (see `docs/independent_audit.md`).
 
 **Updating documentation:** keep `README.md` as the overview and link
 to the `docs/phase*` files for depth rather than duplicating their
