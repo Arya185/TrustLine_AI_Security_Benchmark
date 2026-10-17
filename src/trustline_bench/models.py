@@ -51,9 +51,31 @@ class GatewayDecision:
     details: str = ""
 
 
+@dataclass(frozen=True)
+class Authorization:
+    """A bound, environment-issued proof that a specific tool call was
+    authorized. Only ever constructed by MockToolEnvironment.execute()
+    immediately after a real GatewayVerdict.ALLOW -- see
+    docs/phase4_execution_boundary.md for the full design and its threat
+    model. Deliberately not just a boolean: it is bound to the exact tool
+    name and a fingerprint of the exact arguments it was issued for, and
+    carries an unguessable token the issuing environment tracks, so it
+    cannot be reused for a different tool, different arguments, or a
+    second action, and a bare `True` cannot stand in for it.
+    """
+
+    tool: str
+    args_fingerprint: str
+    token: str
+
+
 @dataclass
 class ExecutionResult:
     executed: bool
     tool: str | None = None
     output: Any = None
     error: str | None = None
+    authorization_token: str | None = None
+    """Links this result back to the specific Authorization that produced
+    it (None if nothing executed), so the gateway's decision and the
+    actual executed action are traceable to each other in the record."""
